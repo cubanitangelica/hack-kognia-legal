@@ -7,71 +7,69 @@ from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
 
 st.set_page_config(page_title="Hack-Kognia Fix", layout="wide")
-st.title("🛠️ Modo de Recuperación: Hack-Kognia")
+st.title("🛠️ Asistente Legal - Versión Estable")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.header("Configuración")
-    api_key = st.text_input("Pega tu NUEVA API Key", type="password")
+    api_key = st.text_input("Pega tu API Key", type="password")
     
-    # Selector de modelo manual sin prefijos raros
-    model_name = st.selectbox(
-        "Selecciona modelo:",
-        ["gemini-1.5-flash", "gemini-pro", "gemini-1.5-pro-latest"]
+    # Menú simple para elegir modelo
+    model_option = st.selectbox(
+        "Modelo de IA:",
+        ["models/gemini-1.5-flash", "models/gemini-pro"]
     )
 
 if api_key:
+    # 1. Configuración Básica
     os.environ["GOOGLE_API_KEY"] = api_key.strip()
     
-    # --- PRUEBA 1: CONEXIÓN DIRECTA (Sin LlamaIndex) ---
-    st.subheader("Paso 1: Prueba de Conexión Directa")
+    # 2. Prueba de conexión rápida
     try:
         genai.configure(api_key=api_key.strip())
-        # Probamos listar modelos para ver si la llave funciona
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content("Di 'Hola Hackathon' si me escuchas.")
-        st.success(f"✅ CONEXIÓN EXITOSA: Google respondió: {response.text}")
-        connection_success = True
+        st.success("✅ Conexión con Google establecida.")
+        
+        # Configurar LlamaIndex con el modelo elegido
+        Settings.llm = Gemini(model=model_option)
+        Settings.embed_model = GeminiEmbedding(model_name="models/embedding-001")
+        
     except Exception as e:
-        st.error(f"❌ LA LLAVE FALLÓ: {e}")
-        st.warning("Solución: Tu API Key no sirve o no tiene permisos. Crea una nueva en aistudio.google.com")
-        connection_success = False
+        st.error(f"Error de conexión: {e}")
 
-    # --- PRUEBA 2: INTENTO DE RAG (Solo si la 1 funciona) ---
-    if connection_success:
-        st.divider()
-        st.subheader("Paso 2: Sistema RAG (Documentos)")
-        
-        uploaded_file = st.file_uploader("Sube el PDF ahora", type=['pdf'])
-        
-        if uploaded_file:
-            try:
-                # Configuración explícita para LlamaIndex
-                # Nota: A veces el embedding falla si no se especifica el modelo exacto
-                Settings.llm = Gemini(model=f"models/{model_name}")
-                Settings.embed_model = GeminiEmbedding(model_name="models/embedding-001")
+    # 3. Sistema de Archivos (RAG)
+    st.divider()
+    uploaded_file = st.file_uploader("Sube el PDF legal aquí", type=['pdf'])
+    
+    if uploaded_file:
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = os.path.join(temp_dir, "temp.pdf")
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getvalue())
                 
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_path = os.path.join(temp_dir, "temp.pdf")
-                    with open(temp_path, "wb") as f:
-                        f.write(uploaded_file.getvalue())
+                with st.spinner("Procesando documento..."):
+                    # Cargar
+                    documents = SimpleDirectoryReader(input_dir=temp_dir).load_data()
+                    # Indexar
+                    index = VectorStoreIndex.from_documents(documents)
+                    query_engine = index.as_query_engine()
+                    st.success("✅ Documento listo para preguntas.")
                     
-                    with st.spinner("Creando Embeddings..."):
-                        documents = SimpleDirectoryReader(input_dir=temp_dir).load_data()
-                        index = VectorStoreIndex.from_documents(documents)
-                        query_engine = index.as_query_engine()
-                        st.success("✅ Indexación RAG Exitosa")
+                    # Chat simple
+                    prompt = st.text_input("¿Qué quieres saber del documento?")
+                    if prompt:
+                        response = query_engine.query(prompt)
+                        st.write(response.response)
                         
-                        prompt = st.text_input("Pregunta al PDF:")
-                        if prompt:
-                            resp = query_engine.query(prompt)
-                            st.write(resp.response)
-                            with st.expander("Ver fuente"):
-                                st.write(resp.source_nodes[0].get_content())
+                        with st.expander("Ver evidencia en el texto"):
+                            if hasattr(response, 'source_nodes') and response.source_nodes:
+                                st.info(response.source_nodes[0].get_content())
+                            else:
+                                st.warning("Respuesta general (sin cita específica).")
                                 
-            except Exception as e:
-                st.error(f"❌ Error en RAG: {e}")
-                st.info("Intenta cambiar el modelo en el menú de la izquierda.")
+        except Exception as e:
+            st.error(f"Ocurrió un error técnico: {e}")
 
 elif not api_key:
+    st.info("👈 Pega tu API Key en la izquierda para empezar.")
     st.info("👈 Pega la llave para iniciar el diagnóstico.")
