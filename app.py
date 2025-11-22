@@ -10,7 +10,7 @@ import io
 # --- CONFIGURACIÓN VISUAL PRO ---
 st.set_page_config(page_title="Kognia Legal AI", layout="wide", page_icon="⚖️")
 
-# CSS para ocultar marcas de agua y mejorar estilo
+# CSS para estilo profesional
 st.markdown("""
 <style>
     .stButton>button {
@@ -26,40 +26,57 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- TÍTULO CON ESTILO ---
 st.markdown('<h1 class="main-header">⚖️ Kognia: Justicia Accesible</h1>', unsafe_allow_html=True)
-st.markdown("---")
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (CON EL DETECTOR AUTOMÁTICO DE VUELTA) ---
 with st.sidebar:
-    st.header("⚙️ Panel de Control")
+    st.header("⚙️ Configuración")
     api_key = st.text_input("🔑 Google API Key", type="password")
     
-    # Selector de Modelo
-    model_options = ["gemini-1.5-flash", "gemini-pro"]
-    model_choice = st.selectbox("🧠 Modelo de IA:", model_options)
+    model_choice = None
     
-    st.info("💡 **Tip:** Usa 'gemini-1.5-flash' para mayor velocidad y respuestas ilimitadas.")
+    # --- AQUÍ ESTÁ LA MAGIA QUE RECUPERAMOS ---
+    if api_key:
+        os.environ["GOOGLE_API_KEY"] = api_key.strip()
+        genai.configure(api_key=api_key.strip())
+        
+        try:
+            with st.spinner("Conectando con Google..."):
+                # Preguntamos a Google qué modelos tiene tu llave
+                modelos_disponibles = []
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        modelos_disponibles.append(m.name)
+                
+                # Filtramos para que solo salgan los Gemini
+                mejores_modelos = [m for m in modelos_disponibles if "gemini" in m and "vision" not in m]
+                
+                if not mejores_modelos:
+                    mejores_modelos = ["models/gemini-1.5-flash"] # Por si acaso
+                    
+                st.success(f"✅ ¡Conectado! {len(mejores_modelos)} modelos detectados.")
+                model_choice = st.selectbox("🧠 Selecciona tu modelo:", mejores_modelos)
+                
+        except Exception as e:
+            st.error("Error validando la llave.")
+    
     st.markdown("---")
-    st.caption("Desarrollado para Hack-Kognia 2025")
+    st.caption("Hack-Kognia 2025")
 
-# --- FUNCIONES AUXILIARES ---
+# --- FUNCIÓN DE AUDIO ---
 def texto_a_audio(texto):
-    """Convierte texto a audio MP3 en memoria"""
     try:
         tts = gTTS(text=texto, lang='es')
         audio_bytes = io.BytesIO()
         tts.write_to_fp(audio_bytes)
         audio_bytes.seek(0)
         return audio_bytes
-    except Exception as e:
+    except Exception:
         return None
 
 # --- LÓGICA PRINCIPAL ---
-if api_key:
-    os.environ["GOOGLE_API_KEY"] = api_key.strip()
-    genai.configure(api_key=api_key.strip())
-
+if api_key and model_choice:
+    
     # Configuración Embeddings Locales
     try:
         Settings.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
@@ -67,21 +84,18 @@ if api_key:
     except Exception:
         pass
 
-    # --- PESTAÑAS DE NAVEGACIÓN ---
-    tab1, tab2 = st.tabs(["💬 Chat con el Documento", "🆚 Traductor de Jerga Legal"])
+    # PESTAÑAS
+    tab1, tab2 = st.tabs(["💬 Chat con el Documento", "🆚 Traductor Jurídico"])
 
-    # ========================================================
-    # PESTAÑA 1: CHAT RAG (Lo que ya tenías mejorado)
-    # ========================================================
+    # --- PESTAÑA 1: CHAT RAG ---
     with tab1:
         col1, col2 = st.columns([1, 2])
         
         with col1:
-            st.success("📂 **Paso 1: Carga tu Documento**")
-            uploaded_file = st.file_uploader("Sube PDF (Leyes, Contratos, Fallos)", type=['pdf'])
+            st.info("📂 **Carga de Documento**")
+            uploaded_file = st.file_uploader("Sube PDF (Leyes, Contratos)", type=['pdf'])
 
-        # Lógica de Indexación
-        index = None
+        # Indexación
         retriever = None
         if uploaded_file:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -89,52 +103,42 @@ if api_key:
                 with open(temp_path, "wb") as f:
                     f.write(uploaded_file.getvalue())
                 
-                with st.spinner("🔍 Leyendo y comprendiendo el documento..."):
+                with st.spinner("🧠 Indexando documento..."):
                     try:
                         documents = SimpleDirectoryReader(input_dir=temp_dir).load_data()
                         index = VectorStoreIndex.from_documents(documents)
                         retriever = index.as_retriever(similarity_top_k=5)
                     except Exception:
-                        st.error("Error leyendo el archivo.")
+                        pass # Silencioso si falla la lectura inicial
 
-        # Chat
         with col2:
             if uploaded_file and retriever:
-                st.info("✅ **Documento activo.** Pregunta lo que quieras.")
+                st.success("✅ Documento listo. Pregunta:")
                 
-                # Historial
                 if "messages" not in st.session_state:
                     st.session_state.messages = []
 
                 for message in st.session_state.messages:
                     with st.chat_message(message["role"]):
                         st.markdown(message["content"])
-                        # Si hay audio guardado, mostrarlo (opcional, simple por ahora)
 
-                # Input
-                if prompt := st.chat_input("Ej: ¿Cuáles son mis obligaciones según este contrato?"):
+                if prompt := st.chat_input("Ej: ¿Qué dice sobre las multas?"):
                     st.session_state.messages.append({"role": "user", "content": prompt})
                     with st.chat_message("user"):
                         st.markdown(prompt)
 
                     with st.chat_message("assistant"):
-                        with st.spinner("Analizando y redactando..."):
+                        with st.spinner("Pensando..."):
                             try:
                                 # RAG
                                 nodes = retriever.retrieve(prompt)
                                 contexto = "\n\n".join([n.get_content() for n in nodes])
                                 
                                 full_prompt = f"""
-                                Eres un abogado experto en lenguaje claro y accesible.
-                                Usa el siguiente contexto para responder la pregunta.
-                                
-                                REGLAS:
-                                1. Usa un tono empático y sencillo.
-                                2. Si usas términos legales, explícalos entre paréntesis.
-                                3. Sé conciso.
-
-                                CONTEXTO: {contexto}
-                                PREGUNTA: {prompt}
+                                Eres un asistente legal claro y útil.
+                                Contexto del PDF: {contexto}
+                                Pregunta: {prompt}
+                                Responde basándote solo en el contexto.
                                 """
                                 
                                 model = genai.GenerativeModel(model_choice)
@@ -142,54 +146,33 @@ if api_key:
                                 
                                 st.markdown(response.text)
                                 
-                                # --- FUNCIÓN PRO: AUDIO ---
+                                # AUDIO AUTO-GENERADO
                                 audio = texto_a_audio(response.text)
                                 if audio:
                                     st.audio(audio, format='audio/mp3')
                                 
-                                with st.expander("🔍 Ver evidencia legal"):
+                                with st.expander("🔍 Ver Evidencia"):
                                     st.caption(contexto)
                                     
                                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-            elif not uploaded_file:
-                st.warning("👈 Sube un PDF a la izquierda para activar el chat.")
-
-    # ========================================================
-    # PESTAÑA 2: COMPARADOR (TRADUCTOR TÉCNICO -> NATURAL)
-    # ========================================================
+    # --- PESTAÑA 2: TRADUCTOR ---
     with tab2:
-        st.header("🆚 Traductor de Lenguaje Jurídico")
-        st.markdown("Pega un párrafo complejo y mira cómo se transforma en lenguaje ciudadano.")
+        st.header("Traductor de Lenguaje Claro")
+        texto_complejo = st.text_area("Pega un texto difícil aquí:", height=150)
         
-        texto_complejo = st.text_area("Pega aquí el texto legal difícil:", height=150, placeholder="Ej: El arrendatario se constituye en mora...")
-        
-        if st.button("✨ Traducir a Lenguaje Claro"):
-            if texto_complejo and api_key:
-                with st.spinner("Traduciendo..."):
-                    prompt_traduccion = f"""
-                    Actúa como un traductor experto. 
-                    Toma el siguiente texto legal y crea una tabla comparativa Markdown con dos columnas:
-                    Columna 1: "Texto Original" (El fragmento clave).
-                    Columna 2: "Explicación Sencilla" (Lenguaje de 5to grado, muy claro).
-                    
-                    Texto a procesar:
-                    {texto_complejo}
-                    """
-                    model = genai.GenerativeModel(model_choice)
-                    res = model.generate_content(prompt_traduccion)
-                    st.markdown(res.text)
-                    
-                    # Audio de la explicación
-                    st.markdown("---")
-                    st.caption("🎧 Escuchar explicación:")
-                    audio_trad = texto_a_audio(res.text.replace("|", " ")) # Limpieza simple
-                    if audio_trad:
-                        st.audio(audio_trad, format='audio/mp3')
-            else:
-                st.warning("Pega un texto y asegúrate de tener la API Key configurada.")
+        if st.button("Traducir y Explicar"):
+            with st.spinner("Traduciendo..."):
+                prompt_trad = f"Explica esto como para un niño de 10 años en una tabla comparativa: {texto_complejo}"
+                model = genai.GenerativeModel(model_choice)
+                res = model.generate_content(prompt_trad)
+                st.markdown(res.text)
+                
+                audio_trad = texto_a_audio(res.text.replace("|", " "))
+                if audio_trad:
+                    st.audio(audio_trad, format='audio/mp3')
 
 elif not api_key:
-    st.warning("🔒 Ingresa tu API Key en la barra lateral para desbloquear el sistema.")
+    st.warning("👈 Pega tu API Key para que el sistema detecte tus modelos.")
