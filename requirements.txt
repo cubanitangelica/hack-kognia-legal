@@ -1,8 +1,8 @@
 streamlit
 llama-index-core
 llama-index-llms-gemini
-llama-index-embeddings-gemini
-llama-index-embeddings-openai
+llama-index-embeddings-huggingface
 llama-index-readers-file
 pypdf
 google-generativeai
+sentence-transformers
